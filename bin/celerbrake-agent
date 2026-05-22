@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
+
+require 'optparse'
+require 'logger'
+require 'time'
+require 'celerbrake/agent'
+
+options = { config: 'celerbrake-agent.yml', once: false }
+OptionParser.new do |o|
+  o.banner = 'Usage: celerbrake-agent [--config PATH] [--once]'
+  o.on('--config PATH', 'Path to the config YAML (default: celerbrake-agent.yml)') { |v| options[:config] = v }
+  o.on('--once', 'Scrape + push once, then exit (handy for testing)') { options[:once] = true }
+  o.on('-h', '--help', 'Show this help') { puts o; exit 0 }
+end.parse!
+
+logger = Logger.new($stdout)
+logger.formatter = ->(severity, time, _progname, msg) { "#{time.utc.iso8601} #{severity} #{msg}\n" }
+
+config = Celerbrake::Agent::Config.load(options[:config]).validate!
+runner = Celerbrake::Agent::Runner.new(config: config, logger: logger)
+
+options[:once] ? runner.run_once : runner.run
