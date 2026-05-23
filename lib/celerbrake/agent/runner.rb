@@ -2,10 +2,13 @@ require 'time'
 
 module Celerbrake
   module Agent
-    # The run loop: on each tick, scrape every configured target, parse the
-    # exposition into samples, stamp them with the scrape time, and push them to
-    # Celerbrake. A failed push is logged and dropped for now — disk buffering +
-    # retry is the next hardening pass (see docs/APM_ROADMAP.md R1).
+    # The run loop. On each tick it:
+    #   1. drains the disk buffer (replays batches that failed on earlier ticks),
+    #   2. scrapes each metrics target -> pushes the samples,
+    #   3. reads new log lines from each tailed file -> pushes the events.
+    # Any push failure (network error or non-2xx) is caught and the batch is
+    # written to the disk buffer for replay, so a Celerbrake outage never drops
+    # data and never crashes the agent.
     class Runner
       def initialize(config:, logger:)
         @config = config
@@ -22,36 +25,52 @@ module Celerbrake
           Scraper.new(url: t[:url], token: t[:token], logger: logger,
                       open_timeout: config.open_timeout, read_timeout: config.read_timeout)
         end
+        @tailers = config.log_paths.map { |path| LogTailer.new(path: path, logger: logger) }
+        @buffer  = Buffer.new(dir: config.buffer_dir, logger: logger, max_bytes: config.buffer_max_bytes)
         @stop = false
       end
 
-      # One scrape+push cycle across all targets. Returns the number of samples pushed.
+      # One full cycle. Returns { metrics:, logs:, replayed: } counts.
       def run_once(now: Time.now)
+        replayed = drain_buffer
         ts = now.utc.iso8601
-        pushed = 0
 
+        metrics = 0
         @scrapers.each do |scraper|
           text = scraper.scrape
           next unless text
 
           samples = PrometheusParser.parse(text).map { |s| s.merge(ts: ts) }
-          next if samples.empty?
-
-          begin
-            pushed += @client.push_metrics(samples)
-          rescue Client::Error => e
-            @logger.error(e.message)
-          end
+          metrics += deliver(:metrics, samples) unless samples.empty?
         end
 
-        @logger.info("celerbrake-agent: pushed #{pushed} samples") if pushed.positive?
-        pushed
+        logs = 0
+        @tailers.each do |tailer|
+          events = tailer.read_new
+          logs += deliver(:logs, events) unless events.empty?
+        end
+
+        if (metrics + logs + replayed).positive?
+          extra = replayed.positive? ? " (+#{replayed} replayed from buffer)" : ''
+          @logger.info("celerbrake-agent: pushed #{metrics} samples, #{logs} log events#{extra}")
+        end
+
+        { metrics: metrics, logs: logs, replayed: replayed }
       end
 
       def run
         trap_signals
-        @logger.info("celerbrake-agent: starting (interval #{@config.interval}s, #{@scrapers.size} target(s))")
-        run_once until (sleep_interval; @stop)
+        @logger.info(
+          "celerbrake-agent: starting (interval #{@config.interval}s, " \
+          "#{@scrapers.size} scrape target(s), #{@tailers.size} log file(s))"
+        )
+        loop do
+          run_once
+          break if @stop
+
+          sleep_interval
+          break if @stop
+        end
         @logger.info('celerbrake-agent: stopped')
       end
 
@@ -60,6 +79,39 @@ module Celerbrake
       end
 
       private
+
+      # Push a batch; on failure, buffer it for replay. Returns the number of
+      # items delivered (0 if it was buffered).
+      def deliver(kind, items)
+        push(kind, items)
+        items.size
+      rescue Client::Error => e
+        @logger.error("#{e.message} — buffering #{items.size} #{kind}")
+        @buffer.enqueue(kind, items)
+        0
+      end
+
+      def push(kind, items)
+        kind.to_sym == :metrics ? @client.push_metrics(items) : @client.push_logs(items)
+      end
+
+      # Replay buffered batches oldest-first; stop at the first failure (the
+      # backend is still down — leave the rest for the next tick). Returns the
+      # number of items successfully replayed.
+      def drain_buffer
+        replayed = 0
+        @buffer.each_batch do |kind, items, path|
+          begin
+            push(kind, items)
+            @buffer.delete(path)
+            replayed += items.size
+          rescue Client::Error => e
+            @logger.warn("celerbrake-agent: buffer replay still failing (#{e.message}); will retry next tick")
+            break
+          end
+        end
+        replayed
+      end
 
       def trap_signals
         %w[INT TERM].each { |sig| Signal.trap(sig) { @stop = true } }

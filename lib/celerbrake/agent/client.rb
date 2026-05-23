@@ -52,7 +52,15 @@ module Celerbrake
         req['User-Agent']    = "celerbrake-agent/#{Celerbrake::Agent::VERSION} Ruby/#{RUBY_VERSION}"
         req.body = JSON.generate(payload)
 
-        response = http.request(req)
+        response =
+          begin
+            http.request(req)
+          rescue StandardError => e
+            # Network/timeout errors (ECONNREFUSED, EOFError, timeouts, …) become
+            # Client::Error too, so the runner buffers + retries instead of crashing.
+            raise Error, "celerbrake-agent: POST #{path} failed: #{e.class}: #{e.message}"
+          end
+
         code = response.code.to_i
         return response if code.between?(200, 299)
 
