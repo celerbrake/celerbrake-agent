@@ -16,6 +16,10 @@ OptionParser.new do |o|
   o.on('-h', '--help', 'Show this help') { puts o; exit 0 }
 end.parse!
 
+# Under systemd, $stdout is a pipe — block-buffered by default, which hides the
+# agent's INFO lines (startup, "pushed N samples …") until the buffer fills.
+# Sync so operational logs reach the journal promptly. (Warnings use $stderr.)
+$stdout.sync = true
 logger = Logger.new($stdout)
 logger.formatter = ->(severity, time, _progname, msg) { "#{time.utc.iso8601} #{severity} #{msg}\n" }
 
