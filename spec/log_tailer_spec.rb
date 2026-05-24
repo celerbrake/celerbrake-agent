@@ -43,12 +43,44 @@ RSpec.describe Celerbrake::Agent::LogTailer do
     end
   end
 
-  it 'forwards non-JSON lines as raw events instead of dropping them' do
+  it 'forwards a prefix-less non-JSON line as a raw event instead of dropping it' do
     with_log do |f|
       tailer = described_class.new(path: f.path, logger: logger)
       tailer.read_new
       append(f, 'not json at all')
       expect(tailer.read_new.first).to include(source: 'raw', level: 'unknown', message: 'not json at all')
+    end
+  end
+
+  it 'lifts level + timestamp from a standard Ruby Logger prefix on a plain line' do
+    with_log do |f|
+      tailer = described_class.new(path: f.path, logger: logger)
+      tailer.read_new
+      append(f, 'I, [2026-05-24T21:30:25.524387 #2527026]  INFO -- : [ActiveJob] Performed CleanupJob')
+      ev = tailer.read_new.first
+      expect(ev).to include(level: 'info', source: 'app', message: '[ActiveJob] Performed CleanupJob',
+                            ts: '2026-05-24T21:30:25.524387')
+    end
+  end
+
+  it 'parses JSON that follows a Logger prefix (e.g. db.slow_query), keeping its fields' do
+    with_log do |f|
+      tailer = described_class.new(path: f.path, logger: logger)
+      tailer.read_new
+      append(f, 'I, [2026-05-24T21:30:25.5 #99]  INFO -- : {"event":"db.slow_query","duration_ms":150,"fingerprint":"abc","request_id":"r9"}')
+      ev = tailer.read_new.first
+      expect(ev[:fields]['event']).to eq('db.slow_query')
+      expect(ev[:level]).to eq('info')
+      expect(ev[:request_id]).to eq('r9')
+    end
+  end
+
+  it 'maps WARN/ERROR prefixes to their levels' do
+    with_log do |f|
+      tailer = described_class.new(path: f.path, logger: logger)
+      tailer.read_new
+      append(f, 'W, [2026-05-24T21:30:26.0 #99]  WARN -- : disk getting full')
+      expect(tailer.read_new.first).to include(level: 'warn', message: 'disk getting full')
     end
   end
 
