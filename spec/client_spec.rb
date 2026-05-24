@@ -37,4 +37,21 @@ RSpec.describe Celerbrake::Agent::Client do
     expect(client.push_metrics([])).to eq(0)
     expect(client.push_logs(nil)).to eq(0)
   end
+
+  it 'coerces binary-encoded payload strings to valid UTF-8 before serializing (json 3.0-safe)' do
+    # Scraped Prometheus text and tailed log lines arrive ASCII-8BIT; without
+    # coercion JSON.generate warns on json 2.x and raises on 3.0.
+    msg = (+'café').force_encoding(Encoding::ASCII_8BIT)   # valid UTF-8 bytes, BINARY-tagged
+    bad = (+"x\xFFy").force_encoding(Encoding::ASCII_8BIT) # genuinely invalid bytes
+
+    stub = stub_request(:post, 'https://cb.example.com/api/v3/projects/7/logs')
+           .with do |req|
+             ev = JSON.parse(req.body)['events'].first
+             ev['message'] == 'café' && ev['raw'].valid_encoding?
+           end
+           .to_return(status: 202, body: '{"accepted":1}')
+
+    expect { client.push_logs([{ message: msg, raw: bad }]) }.not_to raise_error
+    expect(stub).to have_been_requested
+  end
 end

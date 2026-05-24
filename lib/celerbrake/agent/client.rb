@@ -50,7 +50,7 @@ module Celerbrake
         req['Authorization'] = "Bearer #{@project_key}"
         req['Content-Type']  = 'application/json'
         req['User-Agent']    = "celerbrake-agent/#{Celerbrake::Agent::VERSION} Ruby/#{RUBY_VERSION}"
-        req.body = JSON.generate(payload)
+        req.body = JSON.generate(utf8(payload))
 
         response =
           begin
@@ -65,6 +65,25 @@ module Celerbrake
         return response if code.between?(200, 299)
 
         raise Error, "celerbrake-agent: POST #{path} -> #{code}: #{response.body.to_s[0, 200]}"
+      end
+
+      # Scraped Prometheus text (Net::HTTP bodies) and tailed log lines (read in
+      # binary mode) arrive as ASCII-8BIT. Handing those to JSON.generate warns on
+      # json 2.x and *raises* on 3.0, so coerce every string in the payload to
+      # valid UTF-8 first; scrub replaces any genuinely-invalid bytes.
+      def utf8(obj)
+        case obj
+        when String
+          return obj if obj.encoding == Encoding::UTF_8 && obj.valid_encoding?
+
+          obj.dup.force_encoding(Encoding::UTF_8).scrub
+        when Hash
+          obj.each_with_object({}) { |(k, v), acc| acc[utf8(k)] = utf8(v) }
+        when Array
+          obj.map { |v| utf8(v) }
+        else
+          obj
+        end
       end
     end
   end
