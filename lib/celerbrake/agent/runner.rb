@@ -50,6 +50,13 @@ module Celerbrake
           logs += deliver(:logs, events) unless events.empty?
         end
 
+        # The agent's own health, as first-class metrics. Buffer drops were
+        # log-only — REAL DATA LOSS invisible to the system whose whole job is
+        # surfacing problems. Emitted every tick (0 when healthy) so the series
+        # exists before trouble starts; if the push fails these get buffered
+        # and replayed like everything else, preserving the outage record.
+        metrics += deliver(:metrics, self_metrics(ts))
+
         if (metrics + logs + replayed).positive?
           extra = replayed.positive? ? " (+#{replayed} replayed from buffer)" : ''
           @logger.info("celerbrake-agent: pushed #{metrics} samples, #{logs} log events#{extra}")
@@ -79,6 +86,19 @@ module Celerbrake
       end
 
       private
+
+      # The agent reporting on itself: cumulative batches dropped by the full
+      # disk buffer (the data-loss signal — alert-worthy when it moves) and the
+      # current buffer backlog in bytes (growing = Celerbrake unreachable).
+      # Counter resets on agent restart; the server's rollups are reset-aware.
+      def self_metrics(ts)
+        [
+          { name: 'celerbrake_agent_dropped_batches_total', type: 'counter',
+            labels: {}, value: @buffer.dropped.to_f, ts: ts },
+          { name: 'celerbrake_agent_buffer_bytes', type: 'gauge',
+            labels: {}, value: @buffer.size_bytes.to_f, ts: ts }
+        ]
+      end
 
       # Push a batch; on failure, buffer it for replay. Returns the number of
       # items delivered (0 if it was buffered).

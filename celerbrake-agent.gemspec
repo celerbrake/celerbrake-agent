@@ -6,10 +6,12 @@ Gem::Specification.new do |s|
   s.summary     = 'Telemetry collector that ships app metrics and logs to Celerbrake'
   s.description = <<~DESC
     celerbrake-agent is a small, standalone collector process that runs alongside
-    an app, scrapes its local Prometheus /api/metrics endpoint (and, soon, tails
-    its JSON logs), and pushes the telemetry to a Celerbrake instance — authenticated
+    an app, scrapes its local Prometheus /api/metrics endpoint, tails its JSON
+    logs, and pushes the telemetry to a Celerbrake instance — authenticated
     with a project id + key, the same wiring as error reporting. It keeps the app's
-    request path free of any telemetry network I/O (the Datadog-agent model).
+    request path free of any telemetry network I/O (the Datadog-agent model), and
+    buffers to disk through a Celerbrake outage (reporting its own drops/backlog
+    as celerbrake_agent_* metrics).
   DESC
   s.author      = 'Celerbrake'
   s.email       = 'support@celerbrake.com'

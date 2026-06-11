@@ -15,6 +15,11 @@ What it does:
 - **Durability** — if Celerbrake is unreachable, failed batches are buffered to
   disk and replayed on later ticks (bounded; oldest dropped when full). A backend
   outage never blocks your app or loses data on the agent side.
+- **Self-reporting** — the agent ships its own health every tick:
+  `celerbrake_agent_dropped_batches_total` (batches lost to a full buffer — if
+  this moves, you lost data and should know) and `celerbrake_agent_buffer_bytes`
+  (the backlog; growing = Celerbrake unreachable). They chart in the Metrics tab
+  like any app metric.
 
 All of it authenticates with your project id + key — the same wiring as error
 reporting.

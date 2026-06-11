@@ -34,7 +34,7 @@ RSpec.describe Celerbrake::Agent::Config do
       expect(c.host).to eq('https://cb.example.com')
       expect(c.project_id).to eq(7)
       expect(c.project_key).to eq('k3y')
-      expect(c.scrape_targets.first).to eq(url: 'http://localhost:4000/api/metrics', token: 'scrape-tok', interval: nil)
+      expect(c.scrape_targets.first).to eq(url: 'http://localhost:4000/api/metrics', token: 'scrape-tok')
       expect(c.log_paths).to eq(['log/production.log'])
       expect(c.interval).to eq(20)
       expect(c.buffer_dir).to eq('tmp/agent-buf')

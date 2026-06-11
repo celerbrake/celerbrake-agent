@@ -53,7 +53,11 @@ module Celerbrake
           host:             ENV['CELERBRAKE_HOST']        || cb['host'],
           project_id:       ENV['CELERBRAKE_PROJECT_ID']  || cb['project_id'],
           project_key:      ENV['CELERBRAKE_PROJECT_KEY'] || cb['project_key'],
-          scrape_targets:   Array(raw['scrape']).map { |t| { url: t['url'], token: t['token'], interval: t['interval'] } },
+          # NOTE: a per-target `interval` key used to be parsed here but was
+          # never honored (one global flush interval drives every target).
+          # Removed rather than implemented — dead config that LOOKS like a
+          # knob is worse than no knob. Use flush.interval.
+          scrape_targets:   Array(raw['scrape']).map { |t| { url: t['url'], token: t['token'] } },
           log_paths:        Array(raw['logs']).filter_map { |l| l['path'] },
           interval:         (raw.dig('flush', 'interval') || DEFAULT_INTERVAL).to_i,
           buffer_dir:       buffer['dir'] || DEFAULT_BUFFER_DIR,
