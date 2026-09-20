@@ -31,13 +31,23 @@ celerbrake-agent --config celerbrake-agent.yml        # run the loop
 celerbrake-agent --config celerbrake-agent.yml --once # one scrape+push (testing the metrics path)
 ```
 
-Run it as its own process (a `Procfile` line in dev, a systemd unit in prod).
+Run it as its own process: a `Procfile` line in dev, and in production a
+container alongside the app (on the Nanza platform, a Kamal accessory running
+the app's own image, sharing the app's log volume).
+
+> **`host` is required; the agent has no default.** It comes from the config
+> file or from `CELERBRAKE_HOST`, and the agent refuses to start without it.
+> The example below used to show `https://api.celerbrake.com`, which **no longer
+> resolves**. That host is still hardcoded as the default inside the
+> `celerbrake-ruby` notifier gem, which is a separate change (it means a
+> lockfile bump and a redeploy for every app on the fleet), so do not copy it
+> from there either.
 
 ## Config (`celerbrake-agent.yml`)
 
 ```yaml
 celerbrake:
-  host: https://api.celerbrake.com   # your Celerbrake instance
+  host: https://celerbrake.com       # your Celerbrake instance (required)
   project_id: 123                    # from /admin/projects/:id
   project_key: "your-project-key"
 scrape:
