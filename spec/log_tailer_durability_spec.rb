@@ -148,7 +148,9 @@ RSpec.describe Celerbrake::Agent::LogTailer, 'durability' do
 
     restarted = start_agent
     expect(messages(read_and_commit(restarted))).to eq(%w[b c])
-    expect(log_io.string).to include('replaced while the agent was down')
+    # On ext4 the freed inode is reused at once, so the new file can carry the
+    # old inode: the signature of the bytes before the offset tells them apart.
+    expect(log_io.string).to match(/replaced while the agent was down|changed before the saved cursor/)
   end
 
   it 'restarts at 0 after an in-place truncation (copytruncate) to a smaller size' do
