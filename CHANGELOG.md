@@ -8,6 +8,53 @@ the value of `Celerbrake::Agent::VERSION` at the time each change landed.
 
 ### master (unreleased)
 
+- Nothing yet.
+
+### v0.3.0 (2026-10-20)
+
+Collector durability (platform review findings R04 and R05).
+
+- Persistent log cursors: each tailed file's device, inode and byte offset are
+  saved atomically to `state.dir/cursor.json` (default `<buffer.dir>/state`).
+  Tail-from-end now applies only on the first installation; a restart resumes
+  from the cursor, so lines written while the agent was down are no longer
+  skipped. The cursor is committed only after the batch was delivered or
+  spooled; when the spool cannot be written the lines are read again next tick.
+- Rotation by inode: a renamed log is read to its end before the new file is
+  read from byte 0, including a rotation that happened while the agent was down
+  (the old file is found by inode next to the log). In-place truncation is
+  caught by size and by a signature of the bytes before the offset, so a
+  replacement larger than the old offset no longer loses its head.
+- Log events carry `event_id` (`<device>:<inode>:<byte offset>`) so replay
+  duplicates can be identified downstream.
+- Classified client errors: `Client::TooLarge` (413, and the server's 422
+  `batch-too-large`), `Invalid` (400, 422), `Unauthorized` (401, 403),
+  `RateLimited` (429), `ServerError` (5xx and any other non-2xx) and `Transport`
+  (network, timeout), all subclasses of `Client::Error` with `status` and
+  `retry_after` (seconds or an HTTP-date). Messages keep their format.
+- Delivery policy: 413 splits the batch down to single items and quarantines an
+  item that is still too large; 400/422 quarantine the batch with the reason;
+  401/403 spool and log once per state change; 429/5xx/network errors spool
+  and wait for Retry-After or an exponential backoff with jitter (1s to 5 min)
+  during which delivery goes straight to the spool. A permanently refused
+  spooled batch is quarantined and replay continues with the next one.
+- Replay budget per tick: `buffer.replay.max_batches` (50), `max_bytes`
+  (32 MiB) and `max_seconds` (10), so fresh collection continues while a
+  backlog drains.
+- Buffer: atomic writes (temp file, fsync, rename; leftover temp files are
+  swept on start); the incoming batch is accounted for before pruning, so the
+  spool stays within `buffer.max_bytes`; `buffer.max_batch_bytes` (4 MiB)
+  splits a large batch at enqueue; an unreadable batch is quarantined instead
+  of deleted; `quarantine/` has its own cap (`buffer.quarantine_max_bytes`,
+  10 MB) and keeps only the reason and item count for an entry too big for it.
+- Self-metrics: `celerbrake_agent_quarantined_batches_total`,
+  `celerbrake_agent_auth_failures_total` and
+  `celerbrake_agent_cursor_lag_bytes{path}` join the dropped-batches and
+  buffer-bytes series.
+- Log lines no longer contain em dashes.
+
+Also first released in v0.3.0 (landed while the version still read 0.2.0):
+
 - CI: added a GitHub Actions workflow that runs the RSpec suite on Ruby 3.3 and
   3.4. This repository had no workflow at all, so nothing ran its 33 specs on a
   push or a pull request.
